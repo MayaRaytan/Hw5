@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <string.h>
 
-#define BUFF_SIZE = pow(10,6)
+#define BUFF_SIZE = 1000000
 
 
 int perror_exit_1(){
@@ -27,7 +27,7 @@ int get_size_of_file(char *path){
 
 int main(int argc, char *argv[]) {
     int IP_server; ////// ????????????????????????????????? ///////
-    unsigned int C, N;
+    uint32_t C, N;
     unsigned short port_server;
     char *send_path;
     int left_written, sockfd, fd, read_len, write_len, offset;
@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* send N to server */
-    write(sockfd, N, sizeof(unsigned int));
+    write(sockfd, N, sizeof(uint32_t));
 
     /* send N bytes to server */
     left_written = N;
@@ -78,7 +78,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    bytes_read = read(sockfd, &C, sizeof(unsigned int));
+    bytes_read = read(sockfd, &C, sizeof(uint32_t));
 
     close(fd);
     close(sockfd);
