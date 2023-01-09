@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <errno.h>
+
 
 #define BUFF_SIZE = 1000000
 
@@ -72,11 +74,13 @@ int main(int argc, char *argv[]) {
     offset = 0;
     while (read_len = read(fd, buff, BUFF_SIZE) > 0){
         while (left_written > 0){
-            write_len = write(sockfd, buff+offset, read_len) > 0;
-            left_written -= write_len;
-            offset  += write_len;
+            if (write_len = write(sockfd, buff+offset, read_len) > 0) {
+                left_written -= write_len;
+                offset += write_len;
+            }
         }
     }
+
 
     bytes_read = read(sockfd, &C, sizeof(uint32_t));
 

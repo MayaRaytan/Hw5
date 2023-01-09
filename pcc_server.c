@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <errno.h>
+
 
 #define BUFF_SIZE = 1000000
 #define True 1
@@ -65,6 +67,7 @@ int main(int argc, char *argv[]) {
     uint32_t C, N;
     uint32_t
     buff[BUFF_SIZE];
+    int helper = 1;
 
     if (argc != 2) {
         perror_exit_1();
@@ -82,10 +85,14 @@ int main(int argc, char *argv[]) {
     server_addr.sin_port = htons(port_server);
 
     if (bind(listen_fd, (struct sockaddr *) &server_addr, address_size) != 0) {
-        perror();
+        perror_exit_1();
     }
 
     if (listen(listen_fd, 10) != 0) {
+        perror_exit_1();
+    }
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0){
         perror_exit_1();
     }
 
@@ -99,26 +106,62 @@ int main(int argc, char *argv[]) {
         }
 
         if ((read_len = read(connect_fd, &N, sizeof(uint32_t))) < 0) {
-            perror_exit_1();
+            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
+                perror_exit_1();
+            }
+            else{
+                perror("");
+                close(connect_fd);
+                continue;
+            }
+        }
+        else if(read_len == 0 && left_written > 0){
+            perror("");
+            close(connect_fd);
+            continue;
         }
 
         left_written = N;
         /* read bytes from client */
         while (left_written > 0) {
-            if ((read_len = read(connect_fd, buff + offset, left_written)) < 0) {
-                perror_exit_1();
+            if ((read_len = read(connect_fd, buff + offset, left_written)) < 0){
+                if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
+                    perror_exit_1();
+                }
+                else{
+                    perror("");
+                    close(connect_fd);
+                    break;
+                }
+            }
+            else if(read_len == 0 && left_written > 0){
+                perror("");
+                close(connect_fd);
+                break;
             }
             offset += read_len;
             left_written -= read_len;
             count_printable_update_pcc(buff, N);
         }
 
-        close(connect_fd);
-
-        if (write(connect_fd, &C, sizeof(uint32_t)) < 0) {
-            perror_exit_1();
+        if (write_len = write(connect_fd, &C, sizeof(uint32_t)) < 0) {
+            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE) {
+                perror_exit_1();
+            } else {
+                perror("");
+                close(connect_fd);
+                continue;
+            }
+            else if (write_len == 0){
+                perror("");
+                close(connect_fd);
+                continue;
+            }
         }
 
+        close(connect_fd);
+
+        /* in the beginning or at the end ????????????????????????????????? */
         if (finish){
             break;
         }
