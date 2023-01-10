@@ -6,13 +6,21 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <signal.h>
 
 
-#define BUFF_SIZE = 1000000
+#define BUFF_SIZE 1000000
 #define True 1
 
 
-uint32_t pcc_counts[95] = {0};
+uint32_t pcc_total[95] = {0};
+int finish = 0;
 
 
 int perror_exit_1(){
@@ -21,18 +29,19 @@ int perror_exit_1(){
 }
 
 
-unsigned int count_printable_update_pcc(unsigned int *buff, unsigned int N){
+unsigned int count_printable_update_pcc(unsigned int *buff, unsigned int N, int C){
     unsigned int i;
     for (i = 0; i < N; i++){
         if (32 <= buff[i] && buff[i] <= 126){
-            pcc_counts[buff[i] - 32]++;
+            pcc_total[buff[i] - 32]++;
             C++;
         }
     }
+    return C;
 }
 
 
-void my_signal_handler(int signum, siginfo_t *info, void *ptr) {
+void my_signal_handler() {
     finish = 1;
 }
 
@@ -48,11 +57,11 @@ void init_new_sigint(){
 }
 
 
-void print_printable_characters(){
+void print_printable_characters(void){
     int i;
     uint32_t d;
     for (i = 0; i < 95; i++){
-        d = pcc_counts[i];
+        d = pcc_total[i];
         printf("char '%c' : %u times\n", (i + 32), d);
     }
 }
@@ -60,8 +69,8 @@ void print_printable_characters(){
 
 int main(int argc, char *argv[]) {
     unsigned short port_server;
-    int listen_fd, connect_fd, left_written, read_len, write_len;
-    int offset, finish = 0;
+    int listen_fd, connect_fd, left_written, write_len;
+    int offset, read_len = 0;
     socklen_t address_size;
     struct sockaddr_in server_addr;
     uint32_t C, N;
@@ -74,7 +83,6 @@ int main(int argc, char *argv[]) {
     }
 
     port_server = atoi(argv[1]);
-    pcc_data = (pcc_total *) malloc(sizeof(pcc_total));
 
     address_size = sizeof(struct sockaddr_in);
     listen_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -92,7 +100,7 @@ int main(int argc, char *argv[]) {
         perror_exit_1();
     }
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0){
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &helper, sizeof(int)) < 0){
         perror_exit_1();
     }
 
@@ -100,12 +108,13 @@ int main(int argc, char *argv[]) {
 
     while (True) {
         C = 0;
-        connect_fd = accept(listenfd, NULL, NULL);
+        finish = 0;
+        connect_fd = accept(listen_fd, NULL, NULL);
         if (connect_fd < 0) {
             perror_exit_1();
         }
 
-        if ((read_len = read(connect_fd, &N, sizeof(uint32_t))) < 0) {
+        while ((read_len = read(connect_fd, &N + offset, sizeof(uint32_t) - read_len)) < 0){
             if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
                 perror_exit_1();
             }
@@ -115,12 +124,13 @@ int main(int argc, char *argv[]) {
                 continue;
             }
         }
-        else if(read_len == 0 && left_written > 0){
+        else if(read_len == 0 && sizeof(uint32_t) - read_len > 0){
             perror("");
             close(connect_fd);
             continue;
         }
 
+        offset = 0;
         left_written = N;
         /* read bytes from client */
         while (left_written > 0) {
@@ -141,10 +151,13 @@ int main(int argc, char *argv[]) {
             }
             offset += read_len;
             left_written -= read_len;
-            count_printable_update_pcc(buff, N);
+            C = count_printable_update_pcc(buff, N, C);
         }
 
-        if (write_len = write(connect_fd, &C, sizeof(uint32_t)) < 0) {
+
+
+        /* while loop !!!!!!!!!!!!! */
+        if ((write_len = write(connect_fd, &C, sizeof(uint32_t))) < 0) {
             if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE) {
                 perror_exit_1();
             } else {
@@ -152,11 +165,11 @@ int main(int argc, char *argv[]) {
                 close(connect_fd);
                 continue;
             }
-            else if (write_len == 0){
-                perror("");
-                close(connect_fd);
-                continue;
-            }
+        }
+        else if (write_len == 0){
+            perror("");
+            close(connect_fd);
+            continue;
         }
 
         close(connect_fd);

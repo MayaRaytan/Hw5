@@ -6,9 +6,14 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 
-
-#define BUFF_SIZE = 1000000
+#define BUFF_SIZE 1000000
 
 
 int perror_exit_1(){
@@ -28,19 +33,22 @@ int get_size_of_file(char *path){
 
 
 int main(int argc, char *argv[]) {
-    int IP_server; ////// ????????????????????????????????? ///////
+    uint32_t IP_server; ////// ????????????????????????????????? ///////
     uint32_t C, N;
     unsigned short port_server;
     char *send_path;
-    int left_written, sockfd, fd, read_len, write_len, offset;
-    char *buff[BUFF_SIZE];
+    int ip_convert, left_written, sockfd, fd, read_len, write_len, offset;
+    char buff[BUFF_SIZE];
     struct sockaddr_in serv_addr;
 
     if (argc != 4){
         perror_exit_1();
     }
 
-    IP_server = inet_pton(argv[1]);
+    if ((ip_convert = inet_pton(AF_INET, argv[1], &IP_server)) < 0)   {
+        perror_exit_1(); /* ????????????????????????????????????????????????????????? */
+    }
+
     port_server = atoi(argv[2]);
     send_path = argv[3];
 
@@ -49,7 +57,7 @@ int main(int argc, char *argv[]) {
         perror_exit_1();
     }
 
-    N = get_size_of_file();
+    N = get_size_of_file(send_path);
 
     /* code from recitation */
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
@@ -60,29 +68,36 @@ int main(int argc, char *argv[]) {
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port_server);
-    serv_addr.sin_addr.s_addr = inet_addr(IP_server); /* ??????????????? */
+    serv_addr.sin_addr.s_addr = inet_addr(&IP_server); /* ??????????????? */
 
     if (connect(sockfd,(struct sockaddr*) &serv_addr, sizeof(serv_addr)) < 0){
         perror_exit_1();
     }
 
+
+    /* while loop !!!!!!!!!!!!! */
+
     /* send N to server */
-    write(sockfd, N, sizeof(uint32_t));
+    if (write(sockfd, &N, sizeof(uint32_t)) < 0){
+        perror_exit_1();
+    }
 
     /* send N bytes to server */
     left_written = N;
     offset = 0;
-    while (read_len = read(fd, buff, BUFF_SIZE) > 0){
+    while ((read_len = read(fd, buff, BUFF_SIZE)) > 0){
         while (left_written > 0){
-            if (write_len = write(sockfd, buff+offset, read_len) > 0) {
+            if ((write_len = write(sockfd, buff+offset, read_len)) > 0) {
                 left_written -= write_len;
                 offset += write_len;
             }
         }
     }
 
-
-    bytes_read = read(sockfd, &C, sizeof(uint32_t));
+    /* while loop !!!!!!!!!!!!! */
+    if (read(sockfd, &C, sizeof(uint32_t)) < 0){
+        perror_exit_1();
+    }
 
     close(fd);
     close(sockfd);
