@@ -15,7 +15,7 @@
 #include <signal.h>
 
 
-#define BUFF_SIZE 1000000
+#define BUFF_SIZE 1048576
 #define True 1
 
 
@@ -78,7 +78,9 @@ int main(int argc, char *argv[]) {
     buff[BUFF_SIZE];
     int helper = 1;
 
+
     if (argc != 2) {
+        errno = EINVAL;
         perror_exit_1();
     }
 
@@ -109,12 +111,21 @@ int main(int argc, char *argv[]) {
     while (True) {
         C = 0;
         finish = 0;
+        offset = 0;
         connect_fd = accept(listen_fd, NULL, NULL);
         if (connect_fd < 0) {
             perror_exit_1();
         }
 
         while ((read_len = read(connect_fd, &N + offset, sizeof(uint32_t) - read_len)) < 0){
+            if(read_len == 0 && (sizeof(uint32_t) - read_len > 0)){
+                perror("");
+                close(connect_fd);
+                break;
+            }
+            offset += read_len;
+        }
+        if (read_len < 0){
             if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
                 perror_exit_1();
             }
@@ -124,11 +135,9 @@ int main(int argc, char *argv[]) {
                 continue;
             }
         }
-        else if(read_len == 0 && sizeof(uint32_t) - read_len > 0){
-            perror("");
-            close(connect_fd);
-            continue;
-        }
+
+        printf("server, ");
+        printf("%u\n", N);
 
         offset = 0;
         left_written = N;
@@ -180,5 +189,6 @@ int main(int argc, char *argv[]) {
         }
     }
     print_printable_characters();
+    printf("%u", C);
     exit(0);
 }
