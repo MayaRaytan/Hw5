@@ -28,9 +28,41 @@ int perror_exit_1(){
     exit(1);
 }
 
+int client_to_server(char *buff, int upside_down, int sockfd, long left){
+    long done = 0;
+    int res;
+    while (left > 0){
+        /* server to client */
+        if (upside_down){
+            res = read(sockfd, buff + done, left);
+        }
+            /* client to server */
+        else{
+            res = write(sockfd, buff + done, left);
+        }
+        if (res < 0){
+            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
+                perror_exit_1();
+            }
+            perror("");
+            return 0;
+        }
+        if (res == 0){
+            perror("");
+            return 0;
+        }
+        left -= res;
+        done += res;
+    }
+    buff[done] = '\0';
+    return 1;
+}
 
-unsigned int count_printable_update_pcc(unsigned int *buff, unsigned int N, int C){
-    unsigned int i;
+
+
+unsigned int count_printable_update_pcc(char *buff, uint32_t N){
+    uint32_t i;
+    uint32_t C = 0;
     for (i = 0; i < N; i++){
         if (32 <= buff[i] && buff[i] <= 126){
             pcc_total[buff[i] - 32]++;
@@ -47,9 +79,11 @@ void my_signal_handler() {
 
 
 void init_new_sigint(){
+//    struct sigaction new_action;
+//    new_action.sa_handler = my_signal_handler;
     struct sigaction new_action = {
-            .sa_sigaction = my_signal_handler,
-            .sa_flags = SA_SIGINFO
+            .sa_sigaction = &my_signal_handler,
+            .sa_flags = SA_RESTART
     };
     if (sigaction(SIGINT, &new_action, NULL) != 0) {
         perror_exit_1();
@@ -68,16 +102,17 @@ void print_printable_characters(void){
 
 
 int main(int argc, char *argv[]) {
-    unsigned short port_server;
-    int listen_fd, connect_fd, left_written, write_len;
-    int offset, read_len = 0;
+    char buff[BUFF_SIZE];
+    int listen_fd, connect_fd;
+    int move_to_next_client = 0;
+    int helper, res = 1;
+    uint16_t port_server;
     socklen_t address_size;
-    struct sockaddr_in server_addr;
-    uint32_t C, N;
-    uint32_t
-    buff[BUFF_SIZE];
-    int helper = 1;
+    struct sockaddr_in serv_addr;
+    uint32_t C, C_send, N, N_get, keep_N;
 
+    init_new_sigint();
+    printf("after sigint");
 
     if (argc != 2) {
         errno = EINVAL;
@@ -87,18 +122,7 @@ int main(int argc, char *argv[]) {
     port_server = atoi(argv[1]);
 
     address_size = sizeof(struct sockaddr_in);
-    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    memset(&server_addr, 0, address_size);
-
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(port_server);
-
-    if (bind(listen_fd, (struct sockaddr *) &server_addr, address_size) != 0) {
-        perror_exit_1();
-    }
-
-    if (listen(listen_fd, 10) != 0) {
+    if ((listen_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         perror_exit_1();
     }
 
@@ -106,89 +130,78 @@ int main(int argc, char *argv[]) {
         perror_exit_1();
     }
 
-    init_new_sigint();
+    memset(&serv_addr, 0, address_size);
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_port = htons(port_server);
+
+
+    if (bind(listen_fd, (struct sockaddr *) &serv_addr, address_size) != 0) {
+        perror_exit_1();
+    }
+
+    if (listen(listen_fd, 10) != 0) {
+        perror_exit_1();
+    }
+
 
     while (True) {
+
+        /* SIGINT */
+        if (finish){break;}
+
         C = 0;
-        finish = 0;
-        offset = 0;
-        connect_fd = accept(listen_fd, NULL, NULL);
-        if (connect_fd < 0) {
+        move_to_next_client = 0;
+        if ((connect_fd = accept(listen_fd, NULL, NULL)) < 0){
             perror_exit_1();
         }
 
-        while ((read_len = read(connect_fd, &N + offset, sizeof(uint32_t) - read_len)) < 0){
-            if(read_len == 0 && (sizeof(uint32_t) - read_len > 0)){
-                perror("");
-                close(connect_fd);
-                break;
-            }
-            offset += read_len;
-        }
-        if (read_len < 0){
-            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
+        res = client_to_server((char *)&N_get, 0, connect_fd, sizeof(uint32_t));
+        if (!res){
+            if (close(connect_fd) < 0){
                 perror_exit_1();
             }
-            else{
-                perror("");
-                close(connect_fd);
-                continue;
-            }
+            /* continue to next client */
+            continue;
         }
+        N = htonl(N_get);
 
-        printf("server, ");
-        printf("%u\n", N);
+        /* read N bytes from client */
+        keep_N = N;
 
-        offset = 0;
-        left_written = N;
-        /* read bytes from client */
-        while (left_written > 0) {
-            if ((read_len = read(connect_fd, buff + offset, left_written)) < 0){
-                if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE){
+        while (keep_N > 0){
+            res = client_to_server(buff, 0, connect_fd, BUFF_SIZE);
+            if (!res){
+                if (close(connect_fd) < 0){
                     perror_exit_1();
                 }
-                else{
-                    perror("");
-                    close(connect_fd);
-                    break;
-                }
-            }
-            else if(read_len == 0 && left_written > 0){
-                perror("");
-                close(connect_fd);
+                /* continue to next client */
+                move_to_next_client = 1;
                 break;
             }
-            offset += read_len;
-            left_written -= read_len;
-            C = count_printable_update_pcc(buff, N, C);
+            keep_N -= BUFF_SIZE;
+            C += count_printable_update_pcc(buff, N);
         }
 
-
-
-        /* while loop !!!!!!!!!!!!! */
-        if ((write_len = write(connect_fd, &C, sizeof(uint32_t))) < 0) {
-            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE) {
-                perror_exit_1();
-            } else {
-                perror("");
-                close(connect_fd);
-                continue;
-            }
-        }
-        else if (write_len == 0){
-            perror("");
-            close(connect_fd);
+        if (move_to_next_client){
             continue;
         }
 
-        close(connect_fd);
+        C_send = htonl(C);
+        res = client_to_server((char *) &C_send, 1, connect_fd, sizeof(uint32_t));
+        if (!res){
+            if (close(connect_fd) < 0){
+                perror_exit_1();
+            }
+            /* continue to next client */
+            continue;
+        }
 
-        /* in the beginning or at the end ????????????????????????????????? */
-        if (finish){
-            break;
+        if (close(connect_fd) < 0){
+            perror_exit_1();
         }
     }
     print_printable_characters();
-    printf("%u", C);
     exit(0);
 }
