@@ -49,6 +49,10 @@ void client_to_server(char *buff, int upside_down, int sockfd, long left){
         else{
             res = write(sockfd, buff + done, left);
         }
+        if (errno == EINTR){
+            errno = 0;
+            continue;
+        }
         if (res < 0){
             perror_exit_1();
         }
@@ -86,7 +90,6 @@ int main(int argc, char *argv[]) {
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(port_server);
 
-
     /* code from recitation */
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         perror_exit_1();
@@ -101,21 +104,14 @@ int main(int argc, char *argv[]) {
     if ((file = fopen(send_path, "r")) == NULL){
         perror_exit_1();
     }
-//    fd = open(send_path, O_RDONLY);
-//    if (fd < 0) {
-//        perror_exit_1();
-//    }
-
 
     N = get_size_of_file(send_path);
     N_send = htonl(N);
-
     /* send N to server */
-    client_to_server((char *) &N_send, 0, sockfd, sizeof(uint32_t));
+    client_to_server((char *) (&N_send), 0, sockfd, 4);
 
     /* send N bytes to server */
     keep_N = N;
-
     while (keep_N > 0){
         file_read = fread(buff, 1, BUFF_SIZE, file);
         if (file_read <= 0 && !feof(file)){
@@ -126,11 +122,15 @@ int main(int argc, char *argv[]) {
         keep_N -= file_read;
     }
 
-    client_to_server((char *) &C_get, 1, sockfd, sizeof(uint32_t));
-
+    client_to_server((char *) (&C_get), 1, sockfd, 4);
     C = ntohl(C_get);
-    fclose(file);
-    close(sockfd);
+
+    if (fclose(file) == EOF){
+        perror_exit_1();
+    }
+    if (close(sockfd) < 0){
+        perror_exit_1();
+    }
 
     printf("# of printable characters: %u\n", C);
 
